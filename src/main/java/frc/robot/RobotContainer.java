@@ -22,6 +22,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
+import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
@@ -39,6 +40,7 @@ public class RobotContainer
   // The robot's subsystems and commands are defined here...
   private final SwerveSubsystem       drivebase  = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
                                                                                 "swerve/neo"));
+  private final TurretSubsystem       turret     = new TurretSubsystem();
 
   // Establish a Sendable Chooser that will be able to be sent to the SmartDashboard, allowing selection of desired auto
   private final SendableChooser<Command> autoChooser;
@@ -139,6 +141,7 @@ public class RobotContainer
     Command driveFieldOrientedAnglularVelocityKeyboard = drivebase.driveFieldOriented(driveAngularVelocityKeyboard);
     Command driveSetpointGenKeyboard = drivebase.driveWithSetpointGeneratorFieldRelative(
         driveDirectAngleKeyboard);
+         
 
     if (RobotBase.isSimulation())
     {
