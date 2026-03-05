@@ -22,7 +22,11 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
+import frc.robot.commands.ShootOnTheMoveCommand;
+import frc.robot.subsystems.HoodSubsystem;
+import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
@@ -39,8 +43,12 @@ public class RobotContainer
   final         CommandXboxController driverXbox = new CommandXboxController(0);
   // The robot's subsystems and commands are defined here...
   private final SwerveSubsystem       drivebase  = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
-                                                                                "swerve/neo"));
+                                                                                  "swerve/neo"));
+  public VisionSubsystem vision = new VisionSubsystem();
   private final TurretSubsystem       turret     = new TurretSubsystem();
+  private final HoodSubsystem         hood       = new HoodSubsystem();
+  
+  public ShooterSubsystem shooter = new ShooterSubsystem(); // holds hood, flywheel and turret
 
   // Establish a Sendable Chooser that will be able to be sent to the SmartDashboard, allowing selection of desired auto
   private final SendableChooser<Command> autoChooser;
@@ -141,6 +149,7 @@ public class RobotContainer
     Command driveFieldOrientedAnglularVelocityKeyboard = drivebase.driveFieldOriented(driveAngularVelocityKeyboard);
     Command driveSetpointGenKeyboard = drivebase.driveWithSetpointGeneratorFieldRelative(
         driveDirectAngleKeyboard);
+        Command shootOnTheMoCommand = new ShootOnTheMoveCommand(turret, shooter, hood, null);
          
 
     if (RobotBase.isSimulation())
