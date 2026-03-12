@@ -1,45 +1,133 @@
-// Copyright (c) FIRST and other WPILib contributors.
-// Open Source Software; you can modify and/or share it under the terms of
-// the WPILib BSD license file in the root directory of this project.
-
 package frc.robot;
 
-import edu.wpi.first.math.geometry.Translation3d;
-import edu.wpi.first.math.util.Units;
-import swervelib.math.Matter;
+import com.pathplanner.lib.config.PIDConstants;
 
-/**
- * The Constants class provides a convenient place for teams to hold robot-wide numerical or boolean constants. This
- * class should not be used for any other purpose. All constants should be declared globally (i.e. public static). Do
- * not put anything functional in this class.
- *
- * <p>It is advised to statically import this class (or one of its inner classes) wherever the
- * constants are needed, to reduce verbosity.
- */
-public final class Constants
-{
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
 
-  public static final double ROBOT_MASS = (148 - 20.3) * 0.453592; // 32lbs * kg per pound
-  public static final Matter CHASSIS    = new Matter(new Translation3d(0, 0, Units.inchesToMeters(8)), ROBOT_MASS);
-  public static final double LOOP_TIME  = 0.13; //s, 20ms + 110ms sprk max velocity lag
-  public static final double MAX_SPEED  = Units.feetToMeters(14.5);
-  // Maximum speed of the robot in meters per second, used to limit acceleration.
+public class Constants {
+    public static final double loopPeriodSecs = 0.02;
+    public static boolean disableHAL = false;
 
-//  public static final class AutonConstants
-//  {
-//
-//    public static final PIDConstants TRANSLATION_PID = new PIDConstants(0.7, 0, 0);
-//    public static final PIDConstants ANGLE_PID       = new PIDConstants(0.4, 0, 0.01);
-//  }
+    public static final class AutoConstants {
+        public static final PIDConstants translationPID = new PIDConstants(5.0, 0.0, 0.0);
+        public static final PIDConstants rotationPID = new PIDConstants(5.0, 0.0, 0.0);
+    }
 
-  public static final class DrivebaseConstants
-  {
+    public static final class SwerveConstants {
+        public static final boolean chasisVelocityCorrection = false;
+        public static final boolean autonomousChassisVelocityCorrection = false;
+        public static final boolean ChasisSpeedsDiscretization = false;
+        public static final boolean cosineCompensation = true;
+        public static final boolean angularVelocityCompensation = true;
+        public static final double angularVelocityCoefficient = 0.1;
+    }
 
-    // Hold time on motor brakes when disabled
-    public static final double WHEEL_LOCK_TIME = 10; // seconds
-  }
+    public static final class TurretConstants {
+        public static final int id = 12;
+        public static final Translation2d turretOffset = new Translation2d(-0.104775, 0.178743);
+        public static final Rotation2d rotationOffset = Rotation2d.fromDegrees(180);
+        
+        public static final int encoderId = 12;
 
-  public static class OperatorConstants
+        public static final double toleranceDeg = 4;
+        public static final double debounceTime = 0.15;
+
+        public static final double maxLimit = 160;
+        public static final double minLimit = -160;
+
+        public static final double leadTimeSec = 0.25;
+
+        public static final double maxVoltageOut = 5;
+
+        public static final class PID {
+            public static final int P = 70; //was 70
+            public static final int I = 0;
+            public static final int D = 0;
+        }
+    }
+
+    public static final class ShooterConstants {
+        public static final int leaderID = 13;
+        public static final int followMotorID = 14;
+
+        public static final class FlyWheelPID {
+            public static final double P = 0.12265;
+            public static final double I = 0;
+            public static final double D = 0;
+            public static final double S = 0.28431;
+            public static final double V = 0.12273;
+            public static final double A = 0.023227;
+        }
+    }
+
+    public static final class ClimberConstants {
+        public static final int LeftMotorID = 18;
+        public static final double extendPosition = 0;
+        public static final double autoClimbPosition = 0;
+        public static final double tolerance = 0.04;
+
+        public static final class PID {
+            public static final int P = 0;
+            public static final int I = 0;
+            public static final int D = 0;
+            public static final int F = 0;
+        }
+    }
+
+    public static final class BelthopperConstants {
+        public static final int fBeltId = 9;
+        public static final int bBeltId = 11;
+
+        public static final double backBeltFeedRPM = 4000.0;
+
+        public static final class BackBeltPID {
+            public static final double P = 0.1;
+            public static final double S = 0.25;
+            public static final double V = 0.128;
+            public static final double A = 0.0;
+        }
+    }
+
+    public static final class HoodConstants {
+        public static final int id = 16;
+        public static final double debounceTime = 0.15;
+        public static final double maxLimit = 45;
+        public static final double hoodGearRatio = 103.11;
+        public static final double toleranceDeg = 2.0;
+        public static final double peakOutputVoltage = 7;
+
+        public static final class PID {
+            public static final double P = 5;
+            public static final double I = 0;
+            public static final double D = 0;
+        }
+    }
+
+    public static class IntakeConstants {
+        public static final int angleMotorId = 10;
+        public static final int intakeMotorId = 17;
+
+        public static final double intakeMotorStatorLimit = 60.0;
+
+        public static final double deployedPosition = 0;
+        public static final double stowPosition = 7.8;
+        public static final double shootingPosition = 3;
+
+        public static final double p = 10;
+        public static final double i = 0;
+        public static final double d = 0;
+        public static final double g = 0.4;
+
+        public static final double motionMagicCriuseVelocity = 60;
+        public static final double motionMagicCriuseAcceleration = 70;
+        public static final double motionMagicJerk = 150;
+         
+ 
+
+    }
+      
+    public static class OperatorConstants
   {
 
     // Joystick Deadband
