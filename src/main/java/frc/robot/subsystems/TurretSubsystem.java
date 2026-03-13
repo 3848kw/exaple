@@ -3,14 +3,12 @@ package frc.robot.subsystems;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-import com.ctre.phoenix6.configs.Slot0Configs;
-import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.controls.PositionVoltage;
+import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkBase.PersistMode;
+import com.revrobotics.spark.SparkBase.ResetMode;
+import com.revrobotics.spark.config.SparkMaxConfig;
+import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.ctre.phoenix6.hardware.CANcoder;
-import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
-import com.ctre.phoenix6.signals.InvertedValue;
-import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.MathUtil;
@@ -26,20 +24,18 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
-import frc.robot.Robot;
 import frc.robot.Constants.TurretConstants;
+import frc.robot.Robot;
 import frc.robot.utils.sim.PhysicsSim;
 
 @Logged
 public class TurretSubsystem extends SubsystemBase {
-    private final TalonFX motor;
-    private final PositionVoltage positionVoltage;
-    private final CANcoder encoder;
+    private final SparkMax motor;
+    private final CANcoder cancoder;
 
     private final Translation2d turretOffset;
     private final Supplier<Pose2d> swervePoseNow;
 
-    // Continuous RAW desired angle (deg) in motor sensor frame
     private double desiredAngleDeg = 0.0;
 
     private final Debouncer debouncer;
@@ -50,57 +46,39 @@ public class TurretSubsystem extends SubsystemBase {
     private final Alert rangeAlert;
 
     public TurretSubsystem(Supplier<Pose2d> swervePoseNow) {
-        motor = new TalonFX(TurretConstants.id);
-        encoder = new CANcoder(TurretConstants.encoderId);
+        motor = new SparkMax(TurretConstants.id, null);
+        cancoder = new CANcoder(TurretConstants.encoderId);
 
         rangeAlert = new Alert("Turret outside of range", AlertType.kError);
 
-        positionVoltage = new PositionVoltage(0);
         turretOffset = TurretConstants.turretOffset;
         this.swervePoseNow = swervePoseNow;
 
         debouncer = new Debouncer(TurretConstants.debounceTime, DebounceType.kRising);
 
-        encoder.setPosition(encoder.getAbsolutePosition().getValueAsDouble());
-
-        TalonFXConfiguration configs = new TalonFXConfiguration();
-        configs.Slot0.kP = TurretConstants.PID.P;
-        configs.Slot0.kI = TurretConstants.PID.I;
-        configs.Slot0.kD = TurretConstants.PID.D;
-        configs.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
-        configs.Voltage.PeakForwardVoltage = TurretConstants.maxVoltageOut;
-        configs.Voltage.PeakReverseVoltage = -TurretConstants.maxVoltageOut;
-
-        configs.SoftwareLimitSwitch.ForwardSoftLimitEnable = true;
-        configs.SoftwareLimitSwitch.ForwardSoftLimitThreshold = angleToEncoderCounts(TurretConstants.maxLimit);
-        configs.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
-        configs.SoftwareLimitSwitch.ReverseSoftLimitThreshold = angleToEncoderCounts(TurretConstants.minLimit);
-
-        if (Robot.isReal()) {
-            configs.Feedback.FeedbackRemoteSensorID = encoder.getDeviceID();
-            configs.Feedback.FeedbackSensorSource = FeedbackSensorSourceValue.RemoteCANcoder;
-        }
-
-        motor.getConfigurator().apply(configs);
-        motor.setNeutralMode(NeutralModeValue.Brake);
-
+        SparkMaxConfig configs = new SparkMaxConfig();
+        configs.idleMode(IdleMode.kBrake);
+        configs.inverted(false);
+        configs.smartCurrentLimit(60);
+        configs.softLimit
+            .forwardSoftLimit(TurretConstants.maxLimit)
+            .reverseSoftLimit(TurretConstants.minLimit)
+            .forwardSoftLimitEnabled(true)
+            .reverseSoftLimitEnabled(true);
+            motor.configure(configs, ResetMode.kNoResetSafeParameters, PersistMode.kPersistParameters);
         if (Robot.isSimulation()) {
-            PhysicsSim.getInstance().addTalon(motor, DCMotor.getKrakenX60(1));
-            motor.getConfigurator().apply(new Slot0Configs().withKP(5).withKD(0.25));
+            PhysicsSim.getInstance().addSparkMax(motor, DCMotor.getNEO(1));
+        }
+
+        // Zero CANcoder to absolute position on real robot
+        if (Robot.isReal()) {
+            cancoder.setPosition(cancoder.getAbsolutePosition().getValueAsDouble());
         }
     }
 
-    private double angleToEncoderCounts(double angleDeg) {
-        return angleDeg / 360.0;
-    }
-
-    private double encoderCountsToAngle(double rotations) {
-        return rotations * 360.0;
-    }
-
-    // Continuous RAW angle (deg) in motor sensor frame
+    // Continuous RAW angle (deg) from CANcoder
     public double getAngle() {
-        return encoderCountsToAngle(motor.getPosition().getValueAsDouble());
+        return cancoder.getAbsolutePosition().getValueAsDouble() * 360.0;
     }
 
     // Continuous LOGICAL angle (deg) where offset defines "forward"
@@ -144,11 +122,15 @@ public class TurretSubsystem extends SubsystemBase {
         return Math.max(lo, Math.min(hi, x));
     }
 
-
     public void setRobotRelativeAngleDeg(double desiredRawDeg) {
         double clampedDeg = MathUtil.clamp(desiredRawDeg, TurretConstants.minLimit, TurretConstants.maxLimit);
         desiredAngleDeg = clampedDeg;
-        motor.setControl(positionVoltage.withPosition(angleToEncoderCounts(clampedDeg)));
+
+        // Simple P controller using CANcoder feedback
+        double error = MathUtil.inputModulus(clampedDeg - getAngle(), -180.0, 180.0);
+        double output = TurretConstants.PID.P * error;
+        output = MathUtil.clamp(output, -TurretConstants.maxVoltageOut, TurretConstants.maxVoltageOut);
+        motor.setVoltage(output);
     }
 
     private void setFieldAngleDeg(double turretFieldDeg, double robotYawDeg) {
@@ -188,7 +170,6 @@ public class TurretSubsystem extends SubsystemBase {
 
         setRobotRelativeAngleDeg(bestRaw);
     }
-
 
     public Trigger atDesiredAngle() {
         return new Trigger(() ->
@@ -230,7 +211,6 @@ public class TurretSubsystem extends SubsystemBase {
             setFieldAngleDeg(fieldDeg.get(), yawDeg);
         }, this).withName("turret hold field angle");
     }
-
 
     @Override
     public void periodic() {
