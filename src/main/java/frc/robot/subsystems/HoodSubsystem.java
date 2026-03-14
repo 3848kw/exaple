@@ -3,12 +3,16 @@ package frc.robot.subsystems;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-import com.ctre.phoenix6.configs.Slot0Configs;
-import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.controls.PositionVoltage;
-import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.InvertedValue;
-import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkBase.ControlType;
+import com.revrobotics.spark.SparkBase.PersistMode;
+import com.revrobotics.spark.SparkBase.ResetMode;
+import com.revrobotics.spark.config.SparkMaxConfig;
+import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
+import com.revrobotics.RelativeEncoder;
+import com.revrobotics.spark.SparkClosedLoopController;
+import com.revrobotics.spark.config.ClosedLoopConfig;
+import com.revrobotics.spark.config.SparkMaxConfig;
 
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.MathUtil;
@@ -22,13 +26,14 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Robot;
 import frc.robot.Constants.HoodConstants;
-import frc.robot.utils.motors.TalonFxUtils;
 import frc.robot.utils.sim.PhysicsSim;
+import yams.motorcontrollers.SmartMotorControllerConfig.ControlMode;
 
 @Logged
 public class HoodSubsystem extends SubsystemBase {
-    private final TalonFX motor;
-    private final PositionVoltage positionVoltage;
+    private final SparkMax motor;
+    private final RelativeEncoder encoder;
+    private final SparkClosedLoopController closedLoopController;
 
     private Rotation2d desiredAngle = new Rotation2d();
     private final Debouncer debouncer;
@@ -36,36 +41,45 @@ public class HoodSubsystem extends SubsystemBase {
     private Optional<IntakeSubsystem> intake = Optional.empty();
 
     public HoodSubsystem() {
-        motor = new TalonFX(HoodConstants.id);
-        positionVoltage = new PositionVoltage(0);
+        motor = new SparkMax(HoodConstants.id, null);
+        encoder = motor.getEncoder();
+        closedLoopController = motor.getClosedLoopController();
 
         debouncer = new Debouncer(HoodConstants.debounceTime, DebounceType.kRising);
 
-        TalonFxUtils.applyDefaultConfigs(motor);
-        TalonFxUtils.configSoftLimits(motor, encoderCountsToAngle(HoodConstants.maxLimit), -0.4, true);
-        TalonFXConfiguration configs = new TalonFXConfiguration();
+        SparkMaxConfig configs = new SparkMaxConfig();
+        configs.idleMode(IdleMode.kBrake);
+        configs.inverted(HoodConstants.motorInverted);
+        configs.smartCurrentLimit(60);
+        configs.softLimit
+            .forwardSoftLimit(encoderCountsToAngle(HoodConstants.maxLimit))
+            .reverseSoftLimit(-encoderCountsToAngle(HoodConstants.softLimitReverse))
+            .forwardSoftLimitEnabled(true)
+            .reverseSoftLimitEnabled(true);
 
-        configs.MotorOutput.Inverted = InvertedValue.Clockwise_Positive;
-        configs.Voltage.PeakForwardVoltage = HoodConstants.peakOutputVoltage;
-        configs.Voltage.PeakReverseVoltage = -HoodConstants.peakOutputVoltage;
-        configs.Slot0.kP = HoodConstants.PID.P;
-        configs.Slot0.kI = HoodConstants.PID.I;
-        configs.Slot0.kD = HoodConstants.PID.D;
+        // Configure PID for position control
+        ClosedLoopConfig closedLoopConfig = new ClosedLoopConfig();
+        closedLoopConfig.p(HoodConstants.PID.P);
+        closedLoopConfig.i(HoodConstants.PID.I);
+        closedLoopConfig.d(HoodConstants.PID.D);
+        closedLoopConfig.positionWrappingEnabled(false);
+        configs.apply(closedLoopConfig);
 
-        motor.getConfigurator().apply(configs);
+        motor.configure(configs, ResetMode.kNoResetSafeParameters, PersistMode.kPersistParameters);
 
-        motor.setNeutralMode(NeutralModeValue.Brake);
+        // Reset encoder to zero
+        encoder.setPosition(0);
 
-        motor.setPosition(0);
-
-        if(Robot.isSimulation()) {
-            PhysicsSim.getInstance().addTalon(motor, DCMotor.getKrakenX60(1));
-            motor.getConfigurator().apply(new Slot0Configs().withKP(5).withKD(0.25));
+        if (Robot.isSimulation()) {
+            PhysicsSim.getInstance().addSparkMax(motor, DCMotor.getNEO(1));
         }
     }
 
     private double angleToEncoderCounts(double angle) {
-        return (HoodConstants.hoodGearRatio / 360.0) * angle;
+        // SparkMax internal encoder gives position in rotations.
+        // Gear ratio: motor turns (hoodGearRatio) times for 1 full hood rotation (360 deg)
+        // So: motor rotations = (angle / 360) * hoodGearRatio
+        return (angle / 360.0) * HoodConstants.hoodGearRatio;
     }
 
     private double encoderCountsToAngle(double counts) {
@@ -76,7 +90,7 @@ public class HoodSubsystem extends SubsystemBase {
         double desiredDeg = angle.getDegrees();
         double clampedDeg = MathUtil.clamp(desiredDeg, 0, encoderCountsToAngle(HoodConstants.maxLimit));
         desiredAngle = Rotation2d.fromDegrees(clampedDeg);
-        motor.setControl(positionVoltage.withPosition(angleToEncoderCounts(clampedDeg)));
+        closedLoopController.setReference(angleToEncoderCounts(clampedDeg),ControlType.kPosition); ;
     }
 
     public Rotation2d getDesiredAngle() {
@@ -84,7 +98,7 @@ public class HoodSubsystem extends SubsystemBase {
     }
 
     public Rotation2d getAngle() {
-        return Rotation2d.fromDegrees(encoderCountsToAngle(motor.getPosition().getValueAsDouble()));
+        return Rotation2d.fromDegrees(encoderCountsToAngle(encoder.getPosition()));
     }
 
     public Rotation2d getError() {

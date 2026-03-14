@@ -24,11 +24,11 @@ public class Constants {
     }
 
     public static final class TurretConstants {
-        public static final int id = 12;
+        public static final int id = 40;
         public static final Translation2d turretOffset = new Translation2d(-0.104775, 0.178743);
         public static final Rotation2d rotationOffset = Rotation2d.fromDegrees(180);
         
-        public static final int encoderId = 12;
+        public static final int encoderId = 41;
 
         public static final double toleranceDeg = 4;
         public static final double debounceTime = 0.15;
@@ -48,8 +48,8 @@ public class Constants {
     }
 
     public static final class ShooterConstants {
-        public static final int leaderID = 13;
-        public static final int followMotorID = 14;
+        public static final int leaderID = 42;
+        public static final int followMotorID = 43;
 
         public static final class FlyWheelPID {
             public static final double P = 0.12265;
@@ -62,7 +62,7 @@ public class Constants {
     }
 
     public static final class ClimberConstants {
-        public static final int LeftMotorID = 18;
+        public static final int LeftMotorID = 44;
         public static final double extendPosition = 0;
         public static final double autoClimbPosition = 0;
         public static final double tolerance = 0.04;
@@ -90,12 +90,13 @@ public class Constants {
     }
 
     public static final class HoodConstants {
-        public static final int id = 16;
+        public static final int id = 45;
         public static final double debounceTime = 0.15;
-        public static final double maxLimit = 45;
+        public static final double maxLimit = 45; // in encoder counts (rotations)
         public static final double hoodGearRatio = 103.11;
         public static final double toleranceDeg = 2.0;
-        public static final double peakOutputVoltage = 7;
+        public static final boolean motorInverted = false; // Set to true if motor spins opposite
+        public static final double softLimitReverse = -0.4; // reverse soft limit in degrees from home
 
         public static final class PID {
             public static final double P = 5;
@@ -105,8 +106,8 @@ public class Constants {
     }
 
     public static class IntakeConstants {
-        public static final int angleMotorId = 10;
-        public static final int intakeMotorId = 17;
+        public static final int angleMotorId = 46;
+        public static final int intakeMotorId = 47;
 
         public static final double intakeMotorStatorLimit = 60.0;
 

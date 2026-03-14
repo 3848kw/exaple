@@ -5,18 +5,19 @@ import static edu.wpi.first.units.Units.Volts;
 
 import java.util.function.DoubleSupplier;
 
-import com.ctre.phoenix6.configs.Slot0Configs;
-import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.controls.Follower;
-import com.ctre.phoenix6.controls.VelocityVoltage;
-import com.ctre.phoenix6.controls.VoltageOut;
-import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.InvertedValue;
-import com.ctre.phoenix6.signals.MotorAlignmentValue;
-import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.revrobotics.RelativeEncoder;
+import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkClosedLoopController;
+import com.revrobotics.spark.config.ClosedLoopConfig;
+import com.revrobotics.spark.config.SparkMaxConfig;
+import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
+import com.revrobotics.spark.SparkBase.ControlType;
+import com.revrobotics.spark.SparkBase.PersistMode;
+import com.revrobotics.spark.SparkBase.ResetMode;
 
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.system.plant.DCMotor;
+import edu.wpi.first.units.Units;
 import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -26,44 +27,47 @@ import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Constants.ShooterConstants;
 import frc.robot.Robot;
-import frc.robot.utils.motors.TalonFxUtils;
 import frc.robot.utils.sim.PhysicsSim;
 
 @Logged
 public class ShooterSubsystem extends SubsystemBase {
-    private final TalonFX shooterLeader;
-    private final TalonFX shooterFollower ;
-    private final VelocityVoltage velocityVoltage;
-    private final VoltageOut voltageOut;
-    private final Follower follower;
+    private final SparkMax shooterLeader;
+    private final SparkMax shooterFollower;
     
+    private final RelativeEncoder leaderEncoder;
+    private final SparkClosedLoopController closedLoopController;
+
     private double wantedFlyWheelVelocity;
 
     private final SysIdRoutine flywheelRoutine;
     
     public ShooterSubsystem() {
-        shooterLeader = new TalonFX(ShooterConstants.leaderID);
-        shooterFollower = new TalonFX(ShooterConstants.followMotorID);
+        shooterLeader = new SparkMax(ShooterConstants.leaderID, null);
+        shooterFollower = new SparkMax(ShooterConstants.followMotorID, null);
 
-        velocityVoltage = new VelocityVoltage(0);
-        voltageOut = new VoltageOut(0);
+        leaderEncoder = shooterLeader.getEncoder();
+        closedLoopController = shooterLeader.getClosedLoopController();
 
-        follower = new Follower(ShooterConstants.leaderID, MotorAlignmentValue.Opposed);
-        
-        TalonFxUtils.applyDefaultConfigs(shooterLeader);
-        TalonFxUtils.applyDefaultConfigs(shooterFollower);
-        
-        TalonFXConfiguration flywheelConfigs = new TalonFXConfiguration();
-        flywheelConfigs.Slot0.kP = ShooterConstants.FlyWheelPID.P;
-        flywheelConfigs.Slot0.kI = ShooterConstants.FlyWheelPID.I;
-        flywheelConfigs.Slot0.kD = ShooterConstants.FlyWheelPID.D;
-        flywheelConfigs.Slot0.kV = ShooterConstants.FlyWheelPID.V;
-        flywheelConfigs.Slot0.kS = ShooterConstants.FlyWheelPID.S;
-        flywheelConfigs.Slot0.kA = ShooterConstants.FlyWheelPID.A;
-        flywheelConfigs.MotorOutput.Inverted = InvertedValue.CounterClockwise_Positive;
-        shooterLeader.getConfigurator().apply(flywheelConfigs);
-        shooterLeader.setNeutralMode(NeutralModeValue.Coast);
-        shooterFollower.setNeutralMode(NeutralModeValue.Coast);
+        SparkMaxConfig leaderConfig = new SparkMaxConfig();
+        leaderConfig.idleMode(IdleMode.kCoast);
+        leaderConfig.inverted(true); // CounterClockwise_Positive equivalent
+        leaderConfig.smartCurrentLimit(60);
+
+        // Configure PID for velocity control
+        ClosedLoopConfig closedLoopConfig = new ClosedLoopConfig();
+        closedLoopConfig.p(ShooterConstants.FlyWheelPID.P);
+        closedLoopConfig.i(ShooterConstants.FlyWheelPID.I);
+        closedLoopConfig.d(ShooterConstants.FlyWheelPID.D);
+        // SparkMax velocity reference uses the velocity coefficient from config
+        // S (static feedforward) and A (acceleration feedforward) can be set via auxiliary PID
+        leaderConfig.apply(closedLoopConfig);
+
+        shooterLeader.configure(leaderConfig, ResetMode.kNoResetSafeParameters, PersistMode.kPersistParameters);
+
+        SparkMaxConfig followerConfig = new SparkMaxConfig();
+        followerConfig.idleMode(IdleMode.kCoast);
+        followerConfig.follow(shooterLeader); // Follower mode (default is opposed)
+        shooterFollower.configure(followerConfig, ResetMode.kNoResetSafeParameters, PersistMode.kPersistParameters);
 
         flywheelRoutine = new SysIdRoutine(
             new SysIdRoutine.Config(),
@@ -71,9 +75,10 @@ public class ShooterSubsystem extends SubsystemBase {
                 this::setFlywheelVoltage,
                 log -> {
                     log.motor("Flywheel")
-                        .voltage(Volts.of(shooterLeader.getMotorVoltage().getValueAsDouble()))
-                        .angularVelocity(RotationsPerSecond.of(shooterLeader.getVelocity().getValueAsDouble()))
-                        .angularPosition(shooterLeader.getPosition().getValue());
+                        .voltage(Volts.of(shooterLeader.getAppliedOutput() * shooterLeader.getBusVoltage()))
+                        .angularVelocity(RotationsPerSecond.of(leaderEncoder.getVelocity()))
+                       .angularPosition(Units.Rotations.of(leaderEncoder.getPosition()));
+
                 },
                 this
             )
@@ -84,35 +89,26 @@ public class ShooterSubsystem extends SubsystemBase {
         SmartDashboard.putData("SysId/Flywheel/Quasi Rev", flywheelSysidQuadradic(SysIdRoutine.Direction.kReverse));
         SmartDashboard.putData("SysId/Flywheel/Dyn Rev", flywheelSysidDynamic(SysIdRoutine.Direction.kReverse));
 
-        if(Robot.isSimulation()) {
-            PhysicsSim.getInstance().addTalon(shooterLeader, DCMotor.getKrakenX60(1));
-            PhysicsSim.getInstance().addTalon(shooterFollower, DCMotor.getKrakenX60(1));
-            shooterLeader.getConfigurator().apply(new Slot0Configs().withKV(0.12).withKP(1));
-        }
     }
 
     private void setFlywheelVoltage(Voltage volts) {
-        shooterLeader.setControl(voltageOut.withOutput(volts.in(Volts)));
-        shooterFollower.setControl(follower);
+        shooterLeader.setVoltage(volts.in(Volts));
     }
     
-    //FlyWheel commands getters and setters
     public double getFlyWheelVelocity() {
-        return shooterLeader.getVelocity().getValueAsDouble() * 60;
+        return leaderEncoder.getVelocity() * 60; // Convert rotations/sec to RPM
     }
 
     public double getFlyWheelWantedVelocity() {
         return wantedFlyWheelVelocity;
     }
 
-
     private void setFlyWheelVelocity(double velocity) {
         wantedFlyWheelVelocity = velocity;
-        shooterLeader.setControl(velocityVoltage.withVelocity(velocity / 60));
-        shooterFollower.setControl(follower);
+        // Set velocity in rotations per second (SparkMax uses rotations for position/velocity)
+        closedLoopController.setReference(velocity / 60, ControlType.kVelocity);
     }
 
-    //STOP >:c
     public void stop() {
         shooterLeader.stopMotor();
         shooterFollower.stopMotor();

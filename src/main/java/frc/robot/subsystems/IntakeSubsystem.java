@@ -4,13 +4,15 @@ import static edu.wpi.first.units.Units.Meters;
 
 import java.util.Optional;
 
-import com.ctre.phoenix6.configs.Slot0Configs;
-import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.controls.DutyCycleOut;
-import com.ctre.phoenix6.controls.MotionMagicVoltage;
-import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.GravityTypeValue;
-import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkBase.ControlType;
+import com.revrobotics.spark.SparkBase.PersistMode;
+import com.revrobotics.spark.SparkBase.ResetMode;
+import com.revrobotics.spark.config.SparkMaxConfig;
+import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
+import com.revrobotics.RelativeEncoder;
+import com.revrobotics.spark.SparkClosedLoopController;
+import com.revrobotics.spark.config.ClosedLoopConfig;
 
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.MathUtil;
@@ -29,11 +31,11 @@ import swervelib.simulation.ironmaple.simulation.drivesims.SwerveDriveSimulation
 
 @Logged
 public class IntakeSubsystem extends SubsystemBase {
-    private final TalonFX intakeMotor;
-    private final TalonFX deployMotor;
+    private final SparkMax deployMotor;
+    private final SparkMax intakeMotor;
 
-    private final DutyCycleOut intakeControl = new DutyCycleOut(0);
-    private final MotionMagicVoltage positionControl = new MotionMagicVoltage(0);
+    private final RelativeEncoder deployEncoder;
+    private final SparkClosedLoopController deployController;
 
     private IntakeSimulation intakeSim;
     private SwerveDriveSimulation swerveDriveSim;
@@ -42,38 +44,43 @@ public class IntakeSubsystem extends SubsystemBase {
     private Optional<HoodSubsystem> hood = Optional.empty();
 
     public IntakeSubsystem(Optional<SwerveDriveSimulation> swerveDriveSim) {
-        deployMotor = new TalonFX(IntakeConstants.angleMotorId);
-        intakeMotor = new TalonFX(IntakeConstants.intakeMotorId);
+        deployMotor = new SparkMax(IntakeConstants.angleMotorId, null);
+        intakeMotor = new SparkMax(IntakeConstants.intakeMotorId, null);
 
-        TalonFXConfiguration configs = new TalonFXConfiguration();
+        deployEncoder = deployMotor.getEncoder();
+        deployController = deployMotor.getClosedLoopController();
 
-        configs.Slot0.kP = IntakeConstants.p;
-        configs.Slot0.kI = IntakeConstants.i;
-        configs.Slot0.kD = IntakeConstants.d;
-        configs.Slot0.kG = IntakeConstants.g;
+        SparkMaxConfig deployConfig = new SparkMaxConfig();
+        deployConfig.idleMode(IdleMode.kBrake);
+        deployConfig.inverted(false);
+        deployConfig.smartCurrentLimit(60);
 
-        configs.Slot0.GravityType = GravityTypeValue.Arm_Cosine;
+        // Configure closed loop for position control (MotionMagic equivalent)
+        ClosedLoopConfig closedLoopConfig = new ClosedLoopConfig();
+        closedLoopConfig.p(IntakeConstants.p);
+        closedLoopConfig.i(IntakeConstants.i);
+        closedLoopConfig.d(IntakeConstants.d);
+        // SparkMax doesn't have direct gravity feedforward; can add via auxiliary PID if needed
+        deployConfig.apply(closedLoopConfig);
+        // Note: SparkMax's position control is essentially PID with optional motion profiling
+        // For MotionMagic behavior, consider using SmartMotion in config if needed
 
-        configs.MotionMagic.MotionMagicCruiseVelocity = IntakeConstants.motionMagicCriuseVelocity;
-        configs.MotionMagic.MotionMagicAcceleration = IntakeConstants.motionMagicCriuseAcceleration;
-        configs.MotionMagic.MotionMagicJerk = IntakeConstants.motionMagicJerk;
-        configs.MotorOutput.NeutralMode = NeutralModeValue.Brake;
+        deployMotor.configure(deployConfig, ResetMode.kNoResetSafeParameters, PersistMode.kPersistParameters);
 
-        deployMotor.getConfigurator().apply(configs);
-        TalonFXConfiguration intakeConfig = new TalonFXConfiguration();
-        intakeConfig.CurrentLimits.StatorCurrentLimit = IntakeConstants.intakeMotorStatorLimit;
-        intakeConfig.CurrentLimits.StatorCurrentLimitEnable = true;
-        intakeMotor.getConfigurator().apply(intakeConfig);
+        SparkMaxConfig intakeConfig = new SparkMaxConfig();
+        intakeConfig.idleMode(IdleMode.kBrake);
+        intakeConfig.inverted(false);
+        intakeConfig.smartCurrentLimit(50);
+        intakeMotor.configure(intakeConfig, ResetMode.kNoResetSafeParameters, PersistMode.kPersistParameters);
 
         double rioUptime = Timer.getFPGATimestamp();
         if (rioUptime < 180) {
-            deployMotor.setPosition(IntakeConstants.stowPosition);
+            deployEncoder.setPosition(IntakeConstants.stowPosition);
         }
 
         if(Robot.isSimulation()) {
-            PhysicsSim.getInstance().addTalon(intakeMotor, DCMotor.getKrakenX44(1));
-            PhysicsSim.getInstance().addTalon(deployMotor, DCMotor.getKrakenX44(1));
-            deployMotor.getConfigurator().apply(new Slot0Configs().withKP(0.5));
+            PhysicsSim.getInstance().addSparkMax(deployMotor, DCMotor.getNEO(1));
+            PhysicsSim.getInstance().addSparkMax(intakeMotor, DCMotor.getNEO(1));
             this.swerveDriveSim = swerveDriveSim.get();
 
             intakeSim = IntakeSimulation.OverTheBumperIntake("Fuel", this.swerveDriveSim, Meters.of(0.6858), Meters.of(0.254), IntakeSide.FRONT, 50);
@@ -81,24 +88,24 @@ public class IntakeSubsystem extends SubsystemBase {
     }
     
     public double getPosition() {
-        return deployMotor.getPosition().getValueAsDouble();
+        return deployEncoder.getPosition();
     }
 
     public void deploy() {
-        deployMotor.setControl(positionControl.withPosition(IntakeConstants.deployedPosition));
+        deployController.setReference(IntakeConstants.deployedPosition, ControlType.kPosition);
     }
 
     private void stow() {
-        deployMotor.setControl(positionControl.withPosition(IntakeConstants.stowPosition));
+        deployController.setReference(IntakeConstants.stowPosition, ControlType.kPosition);
     }
 
     private void runIntake(double duty) {
-        intakeMotor.setControl(intakeControl.withOutput(duty));
+        intakeMotor.set(duty);
         if (intakeSim != null) intakeSim.startIntake();
     }
 
     private void stopIntake() {
-        intakeMotor.setControl(intakeControl.withOutput(0));
+        intakeMotor.set(0);
         if (intakeSim != null) intakeSim.stopIntake();
     }
 
@@ -106,56 +113,30 @@ public class IntakeSubsystem extends SubsystemBase {
         return intakeSim;
     }
     
-    /**
-     * Sets the turret subsystem reference for coordination.
-     * When intake is stowed, turret will be commanded to home position.
-     */
     public void setTurretSubsystem(TurretSubsystem turretSubsystem) {
         this.turret = Optional.of(turretSubsystem);
     }
 
-    /**
-     * Sets the hood subsystem reference for coordination.
-     * When intake is stowed, hood will be commanded to home position.
-     */
     public void setHoodSubsystem(HoodSubsystem hoodSubsystem) {
         this.hood = Optional.of(hoodSubsystem);
     }
     
-    /**
-     * Checks if intake is deployed.
-     */
     public boolean isDeployed() {
         return MathUtil.isNear(IntakeConstants.deployedPosition, getPosition(), 4);
     }
         
-    /**
-     * Resets the deploy motor encoder so the current physical position
-     * is treated as the stow position. Use this from the dashboard when
-     * the robot is known to be at stow and the encoder has drifted.
-     */
     public Command resetEncoderToStow() {
-        return Commands.runOnce(() -> deployMotor.setPosition(IntakeConstants.stowPosition)).ignoringDisable(true).withName("ResetIntakeToStow");
+        return Commands.runOnce(() -> deployEncoder.setPosition(IntakeConstants.stowPosition)).ignoringDisable(true).withName("ResetIntakeToStow");
     }
 
     public Command resetEncoderToDeploy() {
-        return Commands.runOnce(() -> deployMotor.setPosition(IntakeConstants.deployedPosition)).ignoringDisable(true).withName("ResetIntakeToStow");
+        return Commands.runOnce(() -> deployEncoder.setPosition(IntakeConstants.deployedPosition)).ignoringDisable(true).withName("ResetIntakeToStow");
     }
 
-    /**
-     * Deploys the intake mechanism (angle motor only).
-     * Does NOT run the intake wheels.
-     * Safe to use independently.
-     */
     public Command deployIntake() {
         return Commands.runOnce(this::deploy, this).withName("DeployIntake");
     }
     
-    /**
-     * Stows the intake mechanism back to home position.
-     * First ensures turret is at home and hood is lowered to prevent collision.
-     * Stops wheels if they were running.
-     */
     public Command stowIntake() {
         Command homeTurret = turret
             .map(t -> (Command) Commands.run(() -> t.setRobotRelativeAngleDeg(0.0), t).until(t::isAtHome))
@@ -172,17 +153,9 @@ public class IntakeSubsystem extends SubsystemBase {
         ).withName("Stow Intake");
     }
 
-    
-    /**
-     * Runs the intake rollers at the specified duty cycle.
-     * Automatically deploys intake if not already deployed.
-     * Continues running until the command is interrupted/cancelled.
-     * Stops rollers when command ends.
-     */
     public Command runIntakeRollers() {
         return Commands.startEnd(
             () -> {
-                // Auto-deploy when rollers start running
                 if (!isDeployed()) {
                     deploy();
                 }
@@ -198,7 +171,7 @@ public class IntakeSubsystem extends SubsystemBase {
     public Command shootingPosition() {
         return Commands.startEnd(
             () -> {
-                deployMotor.setControl(positionControl.withPosition(IntakeConstants.shootingPosition));
+                deployController.setReference(IntakeConstants.shootingPosition, ControlType.kPosition);
                 runIntake(0.5);
             }, 
             () -> {
